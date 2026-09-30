@@ -221,9 +221,20 @@ def user_lock(user: str) -> threading.Lock:
         return lock
 
 
-def append_message(msg: dict) -> dict:
+def append_message(msg: dict, after_ts: Optional[int] = None) -> dict:
+    """Append a message. Agent rows pass after_ts so `ts` is strictly newer.
+
+    Ask AI polls with `since=<user ts>` and only renders `ts` greater than that.
+    A same-second agent write would be invisible for the rest of that second.
+    """
     with _messages_lock:
         msgs = load_messages()
+        if after_ts is not None:
+            floor = after_ts
+            if msgs:
+                floor = max(floor, max(int(item.get("ts", 0)) for item in msgs))
+            msg = dict(msg)
+            msg["ts"] = max(int(time.time()), floor + 1)
         msgs.append(msg)
         save_messages(msgs[-MAX_STORED_MESSAGES:])
     return msg
@@ -392,7 +403,7 @@ def generate_agent_reply(user: str, text: str, user_ts: int) -> None:
     except Exception as exc:
         logger.exception("Unexpected GAME reply failure")
         reply = public_error(exc)
-    append_message(make_agent_message(reply, after_ts=user_ts))
+    append_message(make_agent_message(reply), after_ts=user_ts)
 
 
 @app.get("/")
@@ -451,7 +462,7 @@ async def post_response(body: RespondBody):
     if not text:
         return JSONResponse({"error": "empty response"}, status_code=400)
 
-    msg = append_message(make_agent_message(text))
+    msg = append_message(make_agent_message(text), after_ts=0)
     return {"status": "ok", "message": msg}
 
 
