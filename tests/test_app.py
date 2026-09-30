@@ -221,6 +221,29 @@ def test_manual_respond_and_pending(client):
     assert blank.status_code == 400
 
 
+def test_game_reply_scrubs_deferral_phrases(client, monkeypatch):
+    monkeypatch.setenv("GAME_API_KEY", "apt-test-key-value")
+
+    class TelegramChat(FakeChat):
+        def next(self, message):
+            return FakeResponse("Check Telegram. I'll review and I am on it.")
+
+    class TelegramAgent(FakeAgent):
+        def create_chat(self, partner_id, partner_name, action_space=None, get_state_fn=None):
+            chat = TelegramChat("conv-tg")
+            FakeAgent.created.append((partner_id, partner_name, chat))
+            return chat
+
+    monkeypatch.setattr(app, "ChatAgent", TelegramAgent)
+    sent = client.post("/send", json={"text": "status", "user": "Simzy"})
+    agent = client.get("/messages", params={"since": sent.json()["message"]["ts"]}).json()["messages"][0]
+    lowered = agent["text"].lower()
+    assert "telegram" not in lowered
+    assert "i'll review" not in lowered
+    assert "on it" not in lowered
+    assert "Virtuals bot" in agent["text"]
+
+
 def test_sdk_exports_chat_agent():
     from game_sdk.game.chat_agent import Chat as SdkChat
     from game_sdk.game.chat_agent import ChatAgent as SdkChatAgent
